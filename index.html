@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Byte Rails — Seat Reservation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            rajdhani: ['Rajdhani', 'sans-serif'],
+            inter: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            navy: {
+              900: '#060D1A',
+              800: '#0F172A',
+              700: '#162034',
+              600: '#1E2D45',
+              500: '#243554',
+            },
+            rail: {
+              cyan: '#22D3EE',
+              green: '#10B981',
+              red: '#EF4444',
+              amber: '#F59E0B',
+              gold: '#FBBF24',
+            }
+          },
+          keyframes: {
+            slideIn: { '0%': { transform: 'translateX(100%)', opacity: '0' }, '100%': { transform: 'translateX(0)', opacity: '1' } },
+            fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+            ticketReveal: { '0%': { transform: 'translateY(30px) scale(0.95)', opacity: '0' }, '100%': { transform: 'translateY(0) scale(1)', opacity: '1' } },
+            pulse2: { '0%, 100%': { opacity: '1' }, '50%': { opacity: '0.5' } },
+            shimmer: { '0%': { backgroundPosition: '-200% 0' }, '100%': { backgroundPosition: '200% 0' } },
+          },
+          animation: {
+            slideIn: 'slideIn 0.35s cubic-bezier(0.32,0.72,0,1) forwards',
+            fadeIn: 'fadeIn 0.2s ease forwards',
+            ticketReveal: 'ticketReveal 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards',
+            shimmer: 'shimmer 2s linear infinite',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #060D1A; color: #F1F5F9; }
+    .font-raj { font-family: 'Rajdhani', sans-serif; }
+    .font-mono-jet { font-family: 'JetBrains Mono', monospace; }
+
+    /* Scanline texture overlay */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+    }
+
+    /* LED board style header text */
+    .led-text {
+      text-shadow: 0 0 10px rgba(34,211,238,0.8), 0 0 20px rgba(34,211,238,0.4), 0 0 40px rgba(34,211,238,0.2);
+    }
+
+    /* Seat button base */
+    .seat-btn {
+      position: relative;
+      border-radius: 6px;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+      cursor: pointer;
+      border: none;
+      outline: none;
+    }
+    .seat-btn:focus-visible { outline: 2px solid #22D3EE; outline-offset: 2px; }
+    .seat-btn.available {
+      background: linear-gradient(145deg, #10B981, #059669);
+      box-shadow: 0 2px 8px rgba(16,185,129,0.35), inset 0 1px 0 rgba(255,255,255,0.15);
+      color: #fff;
+    }
+    .seat-btn.available:hover {
+      transform: translateY(-2px) scale(1.05);
+      box-shadow: 0 6px 20px rgba(16,185,129,0.55), inset 0 1px 0 rgba(255,255,255,0.2);
+      filter: brightness(1.1);
+    }
+    .seat-btn.available:active { transform: translateY(0) scale(0.98); }
+    .seat-btn.booked {
+      background: linear-gradient(145deg, #EF4444, #DC2626);
+      box-shadow: 0 2px 8px rgba(239,68,68,0.35), inset 0 1px 0 rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.7);
+      cursor: not-allowed;
+    }
+    .seat-btn.booked:hover { transform: none; filter: none; }
+
+    /* Drawer */
+    .drawer-overlay { backdrop-filter: blur(4px); }
+
+    /* Ticket tear effect */
+    .ticket-tear::before, .ticket-tear::after {
+      content: '';
+      position: absolute;
+      left: -12px; right: -12px;
+      height: 24px;
+      background: radial-gradient(circle at 50% 0%, #060D1A 12px, transparent 12px);
+      background-size: 24px 24px;
+    }
+    .ticket-tear::before { top: -12px; background: radial-gradient(circle at 50% 100%, #060D1A 12px, transparent 12px); background-size: 24px 24px; }
+    .ticket-tear::after { bottom: -12px; }
+
+    /* Hole punch circles on ticket */
+    .hole { width: 20px; height: 20px; background: #060D1A; border-radius: 50%; flex-shrink: 0; }
+
+    /* Barcode lines */
+    .barcode {
+      display: flex; gap: 2px; align-items: stretch; height: 48px;
+    }
+    .barcode-bar { background: #0F172A; border-radius: 1px; }
+
+    /* Shimmer loading on ticket */
+    .ticket-shimmer {
+      background: linear-gradient(90deg, transparent 0%, rgba(34,211,238,0.08) 50%, transparent 100%);
+      background-size: 200% 100%;
+      animation: shimmer 2s linear infinite;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0F172A; }
+    ::-webkit-scrollbar-thumb { background: #243554; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #22D3EE; }
+
+    /* Input focus */
+    input:focus { outline: none; border-color: #22D3EE !important; box-shadow: 0 0 0 3px rgba(34,211,238,0.15); }
+
+    @media print {
+      body > *:not(#print-area) { display: none !important; }
+      #print-area { display: block !important; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body class="min-h-screen relative">
+
+  <!-- ═══════════════════════ NAVBAR ═══════════════════════ -->
+  <nav class="relative z-10 border-b border-slate-700/50 bg-navy-800/80 backdrop-blur-xl sticky top-0">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <!-- Logo mark -->
+        <div class="w-9 h-9 rounded-lg bg-rail-cyan/10 border border-rail-cyan/30 flex items-center justify-center">
+          <svg viewBox="0 0 24 24" fill="none" class="w-5 h-5" stroke="#22D3EE" stroke-width="2">
+            <path d="M3 17l3-10h12l3 10M6 17l1 3h10l1-3M9 7V5h6v2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="8" cy="19" r="1.5" fill="#22D3EE" stroke="none"/>
+            <circle cx="16" cy="19" r="1.5" fill="#22D3EE" stroke="none"/>
+          </svg>
+        </div>
+        <div>
+          <span class="font-raj text-2xl font-700 tracking-wider text-white led-text">BYTE</span>
+          <span class="font-raj text-2xl font-700 tracking-wider text-rail-cyan led-text">RAILS</span>
+        </div>
+      </div>
+      <div class="hidden sm:flex items-center gap-6 text-sm font-inter text-slate-400">
+        <span class="flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-rail-green inline-block" style="box-shadow:0 0 6px #10B981"></span>
+          System Online
+        </span>
+        <div class="flex items-center gap-4">
+          <div class="text-center">
+            <div id="nav-available" class="font-raj text-lg font-600 text-rail-green">100</div>
+            <div class="text-xs text-slate-500 uppercase tracking-wide">Available</div>
+          </div>
+          <div class="w-px h-8 bg-slate-700"></div>
+          <div class="text-center">
+            <div id="nav-booked" class="font-raj text-lg font-600 text-rail-red">0</div>
+            <div class="text-xs text-slate-500 uppercase tracking-wide">Booked</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════ HERO STRIP ═══════════════════════ -->
+  <div class="relative z-10 bg-gradient-to-r from-navy-800 via-navy-700 to-navy-800 border-b border-slate-700/30 py-5">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div>
+        <h1 class="font-raj text-3xl sm:text-4xl font-700 tracking-wide text-white">Seat Reservation</h1>
+        <p class="text-slate-400 text-sm mt-1">Select a seat from the map below to begin booking</p>
+      </div>
+      <div class="flex items-center gap-4 text-sm">
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 rounded bg-rail-green" style="box-shadow:0 0 8px rgba(16,185,129,0.5)"></div>
+          <span class="text-slate-300">Available</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 rounded bg-rail-red" style="box-shadow:0 0 8px rgba(239,68,68,0.4)"></div>
+          <span class="text-slate-300">Booked</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 rounded" style="background:linear-gradient(145deg,#22D3EE,#0891B2);box-shadow:0 0 8px rgba(34,211,238,0.5)"></div>
+          <span class="text-slate-300">Selected</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ MAIN CONTENT ═══════════════════════ -->
+  <main class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- BUSINESS CLASS -->
+    <div class="mb-10">
+      <div class="flex items-center gap-3 mb-5">
+        <div class="px-3 py-1 rounded bg-rail-amber/10 border border-rail-amber/30 text-rail-amber font-raj text-sm font-600 tracking-widest uppercase">Business Class</div>
+        <div class="flex-1 h-px bg-gradient-to-r from-rail-amber/30 to-transparent"></div>
+        <span class="font-mono-jet text-xs text-slate-500">Seats 1 – 20 · $3,000</span>
+      </div>
+      <div id="business-grid" class="grid gap-2.5" style="grid-template-columns: repeat(auto-fill, minmax(56px, 1fr))"></div>
+    </div>
+
+    <!-- ECONOMY CLASS -->
+    <div>
+      <div class="flex items-center gap-3 mb-5">
+        <div class="px-3 py-1 rounded bg-rail-cyan/10 border border-rail-cyan/30 text-rail-cyan font-raj text-sm font-600 tracking-widest uppercase">Economy Class</div>
+        <div class="flex-1 h-px bg-gradient-to-r from-rail-cyan/30 to-transparent"></div>
+        <span class="font-mono-jet text-xs text-slate-500">Seats 21 – 100 · $1,500</span>
+      </div>
+      <div id="economy-grid" class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(48px, 1fr))"></div>
+    </div>
+  </main>
+
+  <!-- ═══════════════════════ BOOKING DRAWER ═══════════════════════ -->
+  <div id="drawer-overlay" class="fixed inset-0 z-40 hidden drawer-overlay bg-black/60 animate-fadeIn">
+    <div id="drawer" class="absolute right-0 top-0 h-full w-full max-w-md bg-navy-800 border-l border-slate-700/50 shadow-2xl flex flex-col animate-slideIn">
+
+      <!-- Drawer Header -->
+      <div class="px-6 py-5 border-b border-slate-700/50 flex items-center justify-between">
+        <div>
+          <div class="font-raj text-xl font-600 text-white tracking-wide">Book Seat <span id="drawer-seat-num" class="text-rail-cyan"></span></div>
+          <div id="drawer-class-label" class="text-sm text-slate-400 mt-0.5"></div>
+        </div>
+        <button onclick="closeDrawer()" class="w-8 h-8 rounded-lg bg-slate-700/50 hover:bg-slate-600/50 flex items-center justify-center transition-colors text-slate-400 hover:text-white">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+
+      <!-- Seat Preview Card -->
+      <div class="mx-6 mt-5 rounded-xl border border-slate-700/50 bg-navy-700/40 p-4 flex items-center gap-4">
+        <div id="drawer-seat-badge" class="w-14 h-14 rounded-xl flex items-center justify-center font-mono-jet font-700 text-lg text-white flex-shrink-0"></div>
+        <div>
+          <div id="drawer-seat-type-display" class="font-raj text-lg font-600 text-white"></div>
+          <div id="drawer-price-display" class="font-mono-jet text-rail-cyan text-base"></div>
+          <div class="text-xs text-slate-500 mt-0.5">Price may vary based on age</div>
+        </div>
+      </div>
+
+      <!-- Form -->
+      <div class="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+        <div>
+          <label class="block text-sm font-500 text-slate-300 mb-2">Passenger Name</label>
+          <input id="input-name" type="text" placeholder="Enter full name"
+            class="w-full bg-navy-700/60 border border-slate-600/60 rounded-xl px-4 py-3 text-white placeholder-slate-500 text-sm transition-all"
+            oninput="clearError('name-error')" />
+          <p id="name-error" class="text-rail-red text-xs mt-1.5 hidden">Please enter a valid name.</p>
+        </div>
+        <div>
+          <label class="block text-sm font-500 text-slate-300 mb-2">Age</label>
+          <input id="input-age" type="number" min="1" max="120" placeholder="Enter age (1–120)"
+            class="w-full bg-navy-700/60 border border-slate-600/60 rounded-xl px-4 py-3 text-white placeholder-slate-500 text-sm transition-all"
+            oninput="updatePricePreview()" />
+          <p id="age-error" class="text-rail-red text-xs mt-1.5 hidden">Please enter a valid age (1–120).</p>
+        </div>
+
+        <!-- Discount notice -->
+        <div id="discount-notice" class="hidden rounded-xl border border-rail-amber/30 bg-rail-amber/5 px-4 py-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-rail-amber flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke-linecap="round"/></svg>
+            <span id="discount-text" class="text-rail-amber text-sm font-500"></span>
+          </div>
+        </div>
+
+        <!-- Price preview -->
+        <div class="rounded-xl border border-slate-700/40 bg-navy-700/30 p-4">
+          <div class="flex justify-between items-center text-sm mb-2">
+            <span class="text-slate-400">Base Fare</span>
+            <span id="preview-base" class="font-mono-jet text-white">—</span>
+          </div>
+          <div id="discount-row" class="flex justify-between items-center text-sm mb-2 hidden">
+            <span class="text-slate-400">Discount</span>
+            <span id="preview-discount" class="font-mono-jet text-rail-amber">—</span>
+          </div>
+          <div class="h-px bg-slate-700/50 my-2"></div>
+          <div class="flex justify-between items-center">
+            <span class="font-500 text-slate-200">Total</span>
+            <span id="preview-total" class="font-mono-jet font-700 text-rail-cyan text-lg">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Confirm Button -->
+      <div class="px-6 py-5 border-t border-slate-700/50">
+        <button onclick="confirmBooking()"
+          class="w-full py-3.5 rounded-xl bg-gradient-to-r from-rail-cyan to-sky-500 text-navy-900 font-raj font-700 text-lg tracking-wide transition-all hover:brightness-110 hover:shadow-lg hover:shadow-rail-cyan/25 active:scale-98">
+          Confirm Booking
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ TICKET MODAL ═══════════════════════ -->
+  <div id="ticket-overlay" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
+    <div class="w-full max-w-lg animate-ticketReveal" id="ticket-wrapper">
+
+      <!-- Ticket -->
+      <div id="boarding-pass" class="relative bg-navy-700 rounded-2xl overflow-hidden shadow-2xl border border-slate-600/30">
+
+        <!-- Top colored stripe -->
+        <div id="ticket-stripe" class="h-2 w-full"></div>
+
+        <!-- Header -->
+        <div class="px-6 pt-5 pb-4 border-b border-dashed border-slate-600/60">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="flex items-center gap-2 mb-1">
+                <svg viewBox="0 0 24 24" fill="none" class="w-5 h-5" stroke="#22D3EE" stroke-width="2">
+                  <path d="M3 17l3-10h12l3 10M6 17l1 3h10l1-3M9 7V5h6v2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="8" cy="19" r="1.5" fill="#22D3EE" stroke="none"/>
+                  <circle cx="16" cy="19" r="1.5" fill="#22D3EE" stroke="none"/>
+                </svg>
+                <span class="font-raj text-xl font-700 text-white">BYTE<span class="text-rail-cyan">RAILS</span></span>
+              </div>
+              <div class="font-mono-jet text-xs text-slate-500 uppercase tracking-widest">Official Boarding Pass</div>
+            </div>
+            <div class="text-right">
+              <div id="ticket-class-badge" class="px-3 py-1 rounded-full text-xs font-raj font-600 tracking-widest uppercase"></div>
+              <div id="ticket-ref" class="font-mono-jet text-xs text-slate-500 mt-2"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Passenger Row -->
+        <div class="px-6 py-4 flex items-center gap-4 border-b border-slate-700/30">
+          <div id="ticket-avatar" class="w-12 h-12 rounded-xl flex items-center justify-center font-raj text-xl font-700 text-white flex-shrink-0"></div>
+          <div>
+            <div class="text-xs text-slate-500 uppercase tracking-widest mb-0.5">Passenger</div>
+            <div id="ticket-name" class="font-raj text-xl font-600 text-white tracking-wide"></div>
+          </div>
+          <div class="ml-auto text-right">
+            <div class="text-xs text-slate-500 uppercase tracking-widest mb-0.5">Age</div>
+            <div id="ticket-age" class="font-mono-jet text-lg text-white"></div>
+          </div>
+        </div>
+
+        <!-- Details Grid -->
+        <div class="px-6 py-4 grid grid-cols-3 gap-4 border-b border-dashed border-slate-600/50">
+          <div>
+            <div class="text-xs text-slate-500 uppercase tracking-widest mb-1">Seat No.</div>
+            <div id="ticket-seat" class="font-mono-jet text-2xl font-700 text-rail-cyan"></div>
+          </div>
+          <div>
+            <div class="text-xs text-slate-500 uppercase tracking-widest mb-1">Class</div>
+            <div id="ticket-class-text" class="font-raj text-lg font-600 text-white"></div>
+          </div>
+          <div>
+            <div class="text-xs text-slate-500 uppercase tracking-widest mb-1">Status</div>
+            <div class="font-raj text-lg font-600 text-rail-green flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full bg-rail-green inline-block" style="box-shadow:0 0 5px #10B981"></span>
+              Confirmed
+            </div>
+          </div>
+        </div>
+
+        <!-- Tear line + price section (notched) -->
+        <div class="relative">
+          <div class="flex items-center">
+            <div class="w-5 h-10 rounded-r-full bg-navy-800/80 flex-shrink-0 -ml-0 border-r border-slate-600/20"></div>
+            <div class="flex-1 border-t border-dashed border-slate-600/60"></div>
+            <div class="w-5 h-10 rounded-l-full bg-navy-800/80 flex-shrink-0 -mr-0 border-l border-slate-600/20"></div>
+          </div>
+        </div>
+
+        <!-- Price section -->
+        <div class="px-6 py-4 flex items-center justify-between">
+          <div>
+            <div class="text-xs text-slate-500 uppercase tracking-widest mb-1">Ticket Fare</div>
+            <div id="ticket-price" class="font-mono-jet text-3xl font-700 text-rail-cyan"></div>
+            <div id="ticket-discount-note" class="text-xs text-rail-amber mt-0.5 hidden"></div>
+          </div>
+          <!-- Pseudo-barcode -->
+          <div class="barcode" id="ticket-barcode" aria-hidden="true"></div>
+        </div>
+
+        <!-- Bottom shimmer strip -->
+        <div class="ticket-shimmer h-1"></div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex gap-3 mt-4 no-print">
+        <button onclick="printTicket()"
+          class="flex-1 py-3 rounded-xl border border-slate-600/50 bg-navy-700/50 hover:bg-navy-600/50 text-slate-300 hover:text-white font-raj font-600 text-base tracking-wide transition-all flex items-center justify-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Print Ticket
+        </button>
+        <button onclick="closeTicket()"
+          class="flex-1 py-3 rounded-xl bg-gradient-to-r from-rail-cyan to-sky-500 text-navy-900 font-raj font-700 text-base tracking-wide hover:brightness-110 transition-all">
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ TOAST ═══════════════════════ -->
+  <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-60 hidden">
+    <div id="toast-inner" class="px-5 py-3 rounded-xl border text-sm font-500 font-inter shadow-2xl"></div>
+  </div>
+
+  <!-- ═══════════════════════ JAVASCRIPT ═══════════════════════ -->
+  <script>
+    // ── State ─────────────────────────────────────────────────────
+    const seats = {};
+    for (let i = 1; i <= 100; i++) seats[i] = null; // null = available, else { name, age, price }
+    let selectedSeat = null;
+
+    // ── Render Grids ───────────────────────────────────────────────
+    function renderGrids() {
+      const busGrid = document.getElementById('business-grid');
+      const ecoGrid = document.getElementById('economy-grid');
+      busGrid.innerHTML = '';
+      ecoGrid.innerHTML = '';
+
+      for (let i = 1; i <= 100; i++) {
+        const isBusiness = i <= 20;
+        const isBooked = seats[i] !== null;
+        const btn = document.createElement('button');
+        btn.className = `seat-btn ${isBooked ? 'booked' : 'available'} flex flex-col items-center justify-center font-mono-jet ${isBusiness ? 'h-14 text-sm' : 'h-11 text-xs'}`;
+        btn.innerHTML = `<span class="font-700">${i}</span>`;
+        if (!isBooked) {
+          btn.onclick = () => openDrawer(i);
+          btn.title = `Seat ${i} — ${isBusiness ? 'Business' : 'Economy'} — Available`;
+        } else {
+          btn.title = `Seat ${i} — Booked by ${seats[i].name}`;
+        }
+        (isBusiness ? busGrid : ecoGrid).appendChild(btn);
+      }
+      updateNavStats();
+    }
+
+    function updateNavStats() {
+      const booked = Object.values(seats).filter(v => v !== null).length;
+      document.getElementById('nav-available').textContent = 100 - booked;
+      document.getElementById('nav-booked').textContent = booked;
+    }
+
+    // ── Drawer ─────────────────────────────────────────────────────
+    function openDrawer(seatNum) {
+      selectedSeat = seatNum;
+      const isBusiness = seatNum <= 20;
+      const basePrice = isBusiness ? 3000 : 1500;
+      const className = isBusiness ? 'Business Class' : 'Economy Class';
+      const badgeColor = isBusiness
+        ? 'background:linear-gradient(145deg,#F59E0B,#D97706);box-shadow:0 4px 14px rgba(245,158,11,0.4)'
+        : 'background:linear-gradient(145deg,#22D3EE,#0891B2);box-shadow:0 4px 14px rgba(34,211,238,0.4)';
+
+      document.getElementById('drawer-seat-num').textContent = `#${seatNum}`;
+      document.getElementById('drawer-class-label').textContent = className;
+      document.getElementById('drawer-seat-badge').style.cssText = badgeColor;
+      document.getElementById('drawer-seat-badge').textContent = seatNum;
+      document.getElementById('drawer-seat-type-display').textContent = className;
+      document.getElementById('drawer-price-display').textContent = `$${basePrice.toLocaleString()}`;
+
+      document.getElementById('input-name').value = '';
+      document.getElementById('input-age').value = '';
+      document.getElementById('name-error').classList.add('hidden');
+      document.getElementById('age-error').classList.add('hidden');
+      document.getElementById('discount-notice').classList.add('hidden');
+      document.getElementById('discount-row').classList.add('hidden');
+      document.getElementById('preview-base').textContent = `$${basePrice.toLocaleString()}`;
+      document.getElementById('preview-total').textContent = `$${basePrice.toLocaleString()}`;
+      document.getElementById('preview-discount').textContent = '—';
+
+      document.getElementById('drawer-overlay').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeDrawer() {
+      document.getElementById('drawer-overlay').classList.add('hidden');
+      document.body.style.overflow = '';
+      selectedSeat = null;
+    }
+
+    document.getElementById('drawer-overlay').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('drawer-overlay')) closeDrawer();
+    });
+
+    // ── Price Calculation ──────────────────────────────────────────
+    function calcPrice(seatNum, age) {
+      const base = seatNum <= 20 ? 3000 : 1500;
+      if (age < 12) return { base, discount: 0.5, final: base * 0.5, label: '50% child discount (under 12)' };
+      if (age >= 60) return { base, discount: 0.3, final: base * 0.7, label: '30% senior discount (60+)' };
+      return { base, discount: 0, final: base, label: null };
+    }
+
+    function updatePricePreview() {
+      const ageVal = parseInt(document.getElementById('input-age').value);
+      if (!selectedSeat || isNaN(ageVal) || ageVal < 1 || ageVal > 120) return;
+      const p = calcPrice(selectedSeat, ageVal);
+      document.getElementById('preview-base').textContent = `$${p.base.toLocaleString()}`;
+      document.getElementById('preview-total').textContent = `$${p.final.toLocaleString()}`;
+      if (p.discount > 0) {
+        document.getElementById('discount-row').classList.remove('hidden');
+        document.getElementById('preview-discount').textContent = `-${(p.discount * 100).toFixed(0)}%`;
+        document.getElementById('discount-notice').classList.remove('hidden');
+        document.getElementById('discount-text').textContent = p.label;
+      } else {
+        document.getElementById('discount-row').classList.add('hidden');
+        document.getElementById('discount-notice').classList.add('hidden');
+      }
+    }
+
+    function clearError(id) { document.getElementById(id).classList.add('hidden'); }
+
+    // ── Confirm Booking ────────────────────────────────────────────
+    function confirmBooking() {
+      const name = document.getElementById('input-name').value.trim();
+      const ageRaw = document.getElementById('input-age').value.trim();
+      const age = parseInt(ageRaw);
+      let valid = true;
+
+      if (!name || name.length < 2) {
+        document.getElementById('name-error').classList.remove('hidden');
+        valid = false;
+      }
+      if (!ageRaw || isNaN(age) || age < 1 || age > 120) {
+        document.getElementById('age-error').classList.remove('hidden');
+        valid = false;
+      }
+      if (!valid) return;
+
+      const p = calcPrice(selectedSeat, age);
+      seats[selectedSeat] = { name, age, price: p.final, seatClass: selectedSeat <= 20 ? 'Business' : 'Economy' };
+
+      closeDrawer();
+      renderGrids();
+      showTicket(selectedSeat, name, age, p);
+    }
+
+    // ── Ticket ─────────────────────────────────────────────────────
+    function showTicket(seatNum, name, age, priceObj) {
+      const isBusiness = seatNum <= 20;
+      const stripeColor = isBusiness
+        ? 'background:linear-gradient(90deg,#F59E0B,#FBBF24,#F59E0B)'
+        : 'background:linear-gradient(90deg,#22D3EE,#38BDF8,#22D3EE)';
+      const badgeStyle = isBusiness
+        ? 'background:rgba(245,158,11,0.15);color:#FBBF24;border:1px solid rgba(245,158,11,0.4)'
+        : 'background:rgba(34,211,238,0.1);color:#22D3EE;border:1px solid rgba(34,211,238,0.3)';
+      const avatarStyle = isBusiness
+        ? 'background:linear-gradient(145deg,#F59E0B,#D97706)'
+        : 'background:linear-gradient(145deg,#22D3EE,#0891B2)';
+
+      document.getElementById('ticket-stripe').style.cssText = stripeColor;
+      document.getElementById('ticket-class-badge').style.cssText = badgeStyle;
+      document.getElementById('ticket-class-badge').textContent = isBusiness ? '✦ Business' : 'Economy';
+      document.getElementById('ticket-ref').textContent = `REF: BR-${Date.now().toString(36).toUpperCase().slice(-7)}`;
+      document.getElementById('ticket-avatar').style.cssText = avatarStyle;
+      document.getElementById('ticket-avatar').textContent = name.charAt(0).toUpperCase();
+      document.getElementById('ticket-name').textContent = name.toUpperCase();
+      document.getElementById('ticket-age').textContent = age;
+      document.getElementById('ticket-seat').textContent = seatNum.toString().padStart(2, '0');
+      document.getElementById('ticket-class-text').textContent = isBusiness ? 'Business' : 'Economy';
+      document.getElementById('ticket-price').textContent = `$${priceObj.final.toLocaleString()}`;
+
+      const discountNote = document.getElementById('ticket-discount-note');
+      if (priceObj.label) {
+        discountNote.textContent = `${priceObj.label} applied`;
+        discountNote.classList.remove('hidden');
+      } else {
+        discountNote.classList.add('hidden');
+      }
+
+      // Generate barcode
+      const bc = document.getElementById('ticket-barcode');
+      bc.innerHTML = '';
+      const seed = seatNum * 37 + name.length * 13;
+      for (let i = 0; i < 28; i++) {
+        const bar = document.createElement('div');
+        const w = ((seed * (i + 3) * 17) % 3) + 1;
+        bar.className = 'barcode-bar';
+        bar.style.width = w + 'px';
+        bar.style.opacity = (0.5 + ((seed * i) % 5) * 0.1).toFixed(1);
+        bc.appendChild(bar);
+      }
+
+      document.getElementById('ticket-overlay').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeTicket() {
+      document.getElementById('ticket-overlay').classList.add('hidden');
+      document.body.style.overflow = '';
+      showToast('Booking confirmed! 🎉 Your seat is reserved.', 'success');
+    }
+
+    function printTicket() {
+      window.print();
+    }
+
+    // Close ticket overlay on backdrop click
+    document.getElementById('ticket-overlay').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('ticket-overlay')) closeTicket();
+    });
+
+    // ── Toast ──────────────────────────────────────────────────────
+    let toastTimeout;
+    function showToast(msg, type = 'success') {
+      const toast = document.getElementById('toast');
+      const inner = document.getElementById('toast-inner');
+      clearTimeout(toastTimeout);
+      const styles = {
+        success: 'bg-navy-700 border-rail-green/40 text-rail-green',
+        error: 'bg-navy-700 border-rail-red/40 text-rail-red',
+        info: 'bg-navy-700 border-rail-cyan/40 text-rail-cyan',
+      };
+      inner.className = `px-5 py-3 rounded-xl border text-sm font-500 font-inter shadow-2xl ${styles[type]}`;
+      inner.textContent = msg;
+      toast.classList.remove('hidden');
+      toastTimeout = setTimeout(() => toast.classList.add('hidden'), 3500);
+    }
+
+    // ── Init ───────────────────────────────────────────────────────
+    renderGrids();
+  </script>
+</body>
+</html>
