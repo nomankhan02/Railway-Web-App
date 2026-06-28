@@ -8,6 +8,10 @@ import java.util.*;
 @CrossOrigin(origins = "*")
 public class ReservationController {
 
+    // ── Price Constants ────────────────────────────────────────────
+    private static final double BIZ_PRICE = 4500; // 🟩 Fixed backend pricing metrics
+    private static final double ECO_PRICE = 1800; // 🟩 Fixed backend pricing metrics
+
     // ── In-memory state ────────────────────────────────────────────
     // 0 = available, 1 = booked
     private final int[] businessSeats = new int[20];   // seats 1-20
@@ -123,7 +127,7 @@ public class ReservationController {
 
             // Secure seat & set pricing
             businessSeats[targetIndex] = 1;
-            basePrice = 3000;
+            basePrice = BIZ_PRICE; // 🟩 Updated dynamically to 4500
 
         } else if ("Economy".equalsIgnoreCase(req.seatType)) {
             if (req.seatNumber < 21 || req.seatNumber > 100) {
@@ -135,13 +139,12 @@ public class ReservationController {
             
             if (economySeats[targetIndex] == 1) {
                 response.put("success", false);
-                response.put("message", "Seat " + req.seatNumber + " has already been booked.");
                 return response;
             }
 
             // Secure seat & set pricing
             economySeats[targetIndex] = 1;
-            basePrice = 1500;
+            basePrice = ECO_PRICE; // 🟩 Updated dynamically to 1800
 
         } else {
             response.put("success", false);
@@ -213,8 +216,8 @@ public class ReservationController {
                                       double finalPrice,
                                       String seatClass) {
         String discountNote = "";
-        if (req.age < 12)       discountNote = "50% child discount applied (under 12)";
-        else if (req.age >= 60) discountNote = "30% senior discount applied (60+)";
+        if (req.age < 12)       discountNote = "50% child discount (under 12)"; // 🟩 Styled to match frontend labels
+        else if (req.age >= 60) discountNote = "30% senior discount (60+)";     // 🟩 Styled to match frontend labels
 
         response.put("success",      true);
         response.put("message",      "Seat " + req.seatNumber + " booked successfully!");
