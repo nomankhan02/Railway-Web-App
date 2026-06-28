@@ -613,7 +613,7 @@
   function clearError(id) { document.getElementById(id).classList.add('hidden'); }
 
   // ── Confirm Booking ────────────────────────────────────────────
-  async function confirmBooking() {
+ async function confirmBooking() {
     const name   = document.getElementById('input-name').value.trim();
     const ageRaw = document.getElementById('input-age').value.trim();
     const age    = parseInt(ageRaw);
@@ -625,10 +625,20 @@
     const btn = document.querySelector('[onclick="confirmBooking()"]');
     btn.disabled = true; btn.textContent = 'Booking…';
 
+    // 🟩 ADD THIS LINE: Calculate the dynamic final price before sending
+    const priceDetails = calcPricePreview(selectedSeat, age);
+
     try {
       const res  = await fetch('/api/reservation/book', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ name, age, seatType: selectedSeat <= 20 ? 'Business' : 'Economy', seatNumber: selectedSeat })
+        body: JSON.stringify({ 
+          name, 
+          age, 
+          seatType: selectedSeat <= 20 ? 'Business' : 'Economy', 
+          seatNumber: selectedSeat,
+          finalPrice: priceDetails.final, // 🟩 ADD THIS LINE: Send it to the server!
+          discountNote: priceDetails.label // 🟩 OPTIONAL: Send the label along too!
+        })
       });
       const data = await res.json();
       if (data.success) {
